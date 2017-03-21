@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Monitoramento de Host</title>
+  <style media="screen">
+    h1 {
+      text-align: center;
+    }
+    #input{
+      text-align:center;
+      margin-left:auto;
+      margin-right:auto;
+      width: 900px;
+    }
+
+    #info {
+      text-align:center;
+      margin-left:auto;
+      margin-right:auto;
+      width: 900px;
+    }
+    #overview{
+      margin: 0px;
+      display: inline-block;
+      width: 18%;
+    }
+    #historyTable {
+      display: inline-block;
+      margin: 0px;
+      width: 80%;
+      vertical-align: top;
+    }
+    table {
+      width: 100%;
+    }
+    table, td {
+      border-collapse: collapse;
+    }
+    table thead {
+      text-align: center;
+      background-color: #ddd;
+      font-weight: bold;
+    }
+    table, td, th {
+      border: 1px solid #f4f4f4;
+    }
+    table tbody tr:nth-child(even) {
+      background-color: #f4f4f4;
+    }
+    table tbody td:first-of-type span:first-child{
+      display: inline-block;
+    }
+    table tbody td:not(first-child){
+      padding: 20px;
+    }
+    table tbody tr.up td:nth-child(2)>span {
+      background-color: #DCF3E2;
+    }
+    table tbody tr.down td:nth-child(2)>span {
+      background-color: #E8A9A9;
+    }
+
+    #spinner {
+      visibility: hidden;
+      background: url('spinner.gif');
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      margin-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Monitoramento de Host</h1>
+  <div id="input">
+    <input type="text" name="address" id="address" placeholder="Address" value="8.8.8.8">
+    <input type="number" name="count" id="count" placeholder="Count" value="2">
+    <input type="submit" name="ping" id="ping" value="Ping">
+    <div id="spinner"></div>
+  </div>
+  <div id="info">
+
+    <div id="history">
+      <table id="historyTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Host</th>
+            <th>Transmitted</th>
+            <th>Received</th>
+            <th>Lost</th>
+            <th>Time (ms)</th>
+          </tr>
+        </thead>
+        <tbody id="historyTableBody">
+        </tbody>
+      </table>
+      <div id="overview">
+        <h2>Status Host</h2>
+        <h4>Address</h4>
+        <h5>Transmitted</h5>
+        <h6>
+          <span>losted: </span>
+          <span>received: </span>
+        </h6>
+      </div>
+    </div>
+
+
+
+  </div>
+
+  <script>
+    var addressField = document.querySelector("#address");
+    var countField = document.querySelector("#count");
+    var pingField = document.querySelector("#ping");
+    var historyField = document.querySelector("#historyTableBody");
+    var spinnerField = document.querySelector("#spinner");
+    var overviewField = document.querySelector("#overview");
+    var requestCount = 0;
+    var requestObject = [];
+
+    pingField.addEventListener('click', loadPing, false);
+    historyField.addEventListener('click', loadRequestOverview, false);
+
+    function loadRequestOverview(event){
+      let target = event.target;
+      let addressClicked = target.parentNode.classList[0];
+      let overviewClicked;
+      for(let request of requestObject){
+        if(addressClicked == request["address"]){
+          overviewClicked = request;
+        }
+      }
+      console.log(overviewClicked["transmitted"]);
+      overviewField.querySelector("h4").innerHTML = addressClicked;
+      overviewField.querySelector("h5").innerHTML = overviewClicked["transmitted"];
+      overviewField.querySelector("h6").innerHTML = `<span>Losted: ${overviewClicked['losted']} </span>` +
+                                                    `<span>Received: ${overviewClicked['received']}</span>`;
+
+    }
+
+    function loadPing(event){
+      // event.preventDefault();
+      spinnerField.style.visibility = 'visible';
+      makeRequest({
+        url: `http://10.0.25.223:5000/v1/ping/${addressField.value}/${countField.value}`,
+        sucessCallback: (response) => {
+
+          spinnerField.style.visibility = 'hidden';
+          let responseJSON = JSON.parse(response);
+
+          requestCount++;
+          totalTime = 0;
+
+          for(packet of responseJSON["packets"])
+            totalTime += parseFloat(packet["time"]);
+          totalTime = totalTime.toFixed(3);
+
+          let newRequest = {"address": responseJSON["address"],
+                            "transmitted": parseFloat(responseJSON["statistics"]["transmitted"]),
+                            "losted": parseFloat(responseJSON["statistics"]["transmitted"]) - parseFloat(responseJSON["statistics"]["received"]),
+                            "received": parseFloat(responseJSON["statistics"]["received"]),
+                          };
+
+          let flag = 0;
+          for(let request of requestObject){
+            if(newRequest["address"] == request["address"]){
+              flag = 1;
+              request["transmitted"] += newRequest["transmitted"];
+              request["received"] += newRequest["received"];
+              request["losted"] += newRequest["losted"];
+              console.log(request["transmitted"]);
+              console.log(request["received"]);
+              console.log(request["losted"]);
+              break;
+            }
+          }
+          if (flag === 0)
+            requestObject.push(newRequest);
+
+
+          newRow = `<tr class="${responseJSON["address"]}">`+
+                   `<td>${requestCount}</td>`+
+                   `<td>${responseJSON["address"]}</td>`+
+                   `<td>${responseJSON["statistics"]["transmitted"]}</td>`+
+                   `<td>${responseJSON["statistics"]["received"]}</td>`+
+                   `<td>${responseJSON["statistics"]["losted"]}</td>`+
+                   `<td>${totalTime}</td>`+
+                   `</tr>`;
+
+          historyField.innerHTML += newRow;
+          //let lastInsertedRow = historyField.querySelector('tr:last-child')
+          //lastInsertedRow.addEventListener('click', loadRequestOverview, false);
+        },
+
+        errorCallback: (response) => {
+          spinnerField.style.visibility = 'hidden';
+        }
+      });
+    }
+
+    function makeRequest({method = 'get',
+          url = '',
+          data = '',
+          sucessCallback = () => {},
+          errorCallback = () => {}
+        }){
+        let xhr = new XMLHttpRequest();
+        // TODO set header
+        xhr.open(method, url, true);
+        xhr.onload = function(){
+          if (xhr.status >= 200 && xhr.status < 400) {
+            sucessCallback(xhr.responseText);
+          } else {
+            // Connect but it returned an error
+          }
+        }
+        xhr.onerror = function(){
+          // There was a connection error
+          errorCallback();
+        }
+        xhr.send(data);
+      }
+
+  </script>
+</body>
+</html>
